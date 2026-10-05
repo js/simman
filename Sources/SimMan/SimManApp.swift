@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     menuBarExtra = FluidMenuBarExtra(title: "SimMan", systemImage: "iphone.gen3") { [store] in
       MenuContent().environment(store)
     }
+    // Load once up front so the first open usually has simulators to show.
+    Task { await store.refresh() }
   }
 }
 
@@ -21,7 +23,12 @@ struct MenuContent: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      if store.snapshot.simulators.isEmpty {
+      if store.loadedAt == nil && store.error == nil {
+        HStack(spacing: 6) {
+          ProgressView().controlSize(.small)
+          Text("Loading simulators…").foregroundStyle(.secondary)
+        }
+      } else if store.snapshot.simulators.isEmpty {
         Text("No booted simulators").foregroundStyle(.secondary)
       }
       ForEach(store.snapshot.simulators) { simulator in
@@ -33,6 +40,10 @@ struct MenuContent: View {
       Divider()
       HStack {
         Text(Project.root.lastPathComponent).font(.caption).foregroundStyle(.secondary)
+        if store.loadedAt != nil && store.isRefreshing && store.isStale {
+          ProgressView().controlSize(.mini)
+          Text("Refreshing…").font(.caption).foregroundStyle(.secondary)
+        }
         Spacer()
         Button("Quit") { NSApplication.shared.terminate(nil) }
           .buttonStyle(SubtleButtonStyle())
