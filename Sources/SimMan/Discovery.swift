@@ -20,6 +20,11 @@ enum Discovery {
       "--initialUrl", "http://127.0.0.1:\(metro.port)")
   }
 
+  static func setLocation(of simulator: Simulator, latitude: Double, longitude: Double) async throws {
+    // simctl wants `lat,lon` with '.' decimals; Double interpolation is locale-independent.
+    _ = try await run("/usr/bin/xcrun", "simctl", "location", simulator.udid, "set", "\(latitude),\(longitude)")
+  }
+
   // MARK: Worktrees
 
   static func worktrees() async throws -> [Worktree] {

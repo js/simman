@@ -50,15 +50,28 @@ struct MenuContent: View {
 struct SimulatorSection: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
+  @State private var showsDetails = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .firstTextBaseline) {
         DeviceHubLink(simulator: simulator)
         Spacer()
-        CopyUDIDButton(udid: simulator.udid)
+        Button {
+          showsDetails.toggle()
+        } label: {
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .rotationEffect(.degrees(showsDetails ? 90 : 0))
+        }
+        .buttonStyle(SubtleButtonStyle())
+        .help(showsDetails ? "Hide details" : "Show details")
+        .accessibilityIdentifier("\(simulator.udid)|details")
       }
       Text(status).font(.caption).foregroundStyle(.secondary)
+      if showsDetails {
+        SimulatorDetails(simulator: simulator)
+      }
       if case .installed = simulator.app {
         VStack(spacing: 0) {
           ForEach(store.snapshot.worktrees) { worktree in
@@ -178,24 +191,65 @@ struct DeviceHubLink: View {
   }
 }
 
-struct CopyUDIDButton: View {
-  let udid: String
-  @State private var copied = false
+struct SimulatorDetails: View {
+  let simulator: Simulator
 
   var body: some View {
-    Button(copied ? "copied" : "uuid") {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(udid, forType: .string)
-      copied = true
-      Task {
-        try? await Task.sleep(for: .seconds(1))
-        copied = false
+    let location = Project.simulatedLocation
+    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+      GridRow {
+        Text("UUID").foregroundStyle(.secondary)
+        Text(verbatim: simulator.udid)
+          .lineLimit(1).truncationMode(.middle)
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        FeedbackButton(title: "copy", doneTitle: "copied") {
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(simulator.udid, forType: .string)
+        }
+        .gridColumnAlignment(.trailing)
+        .accessibilityIdentifier("\(simulator.udid)|copy-uuid")
+      }
+      GridRow {
+        Text("Location").foregroundStyle(.secondary)
+        // Verbatim, so the locale can't turn the decimal points into commas.
+        Text(verbatim: "\(location.latitude), \(location.longitude)")
+          .textSelection(.enabled)
+        FeedbackButton(title: "set", doneTitle: "done") {
+          try await Discovery.setLocation(of: simulator, latitude: location.latitude, longitude: location.longitude)
+        }
+        .accessibilityIdentifier("\(simulator.udid)|set-location")
       }
     }
     .font(.caption)
+  }
+}
+
+/// A small button that briefly swaps its title for `doneTitle`, or "failed", once its action finishes.
+struct FeedbackButton: View {
+  let title: String
+  let doneTitle: String
+  let action: () async throws -> Void
+  @State private var outcome: String?
+  @State private var isRunning = false
+
+  var body: some View {
+    Button(outcome ?? title) {
+      isRunning = true
+      Task {
+        do {
+          try await action()
+          outcome = doneTitle
+        } catch {
+          outcome = "failed"
+        }
+        isRunning = false
+        try? await Task.sleep(for: .seconds(1))
+        outcome = nil
+      }
+    }
+    .disabled(isRunning)
     .buttonStyle(SubtleButtonStyle())
-    .help(udid)
-    .accessibilityIdentifier("\(udid)|uuid")
   }
 }
 

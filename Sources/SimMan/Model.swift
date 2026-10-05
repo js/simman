@@ -4,6 +4,7 @@ import Foundation
 enum Project {
   static let root = URL(filePath: NSString(string: "~/Projects/elton-app").expandingTildeInPath)
   static let bundleID = "no.vg.lab.zapp"
+  static let simulatedLocation = (latitude: 59.914797, longitude: 10.787715)
 }
 
 struct Worktree: Identifiable, Hashable, Sendable {
