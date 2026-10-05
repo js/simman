@@ -139,14 +139,14 @@ struct WorktreeRow: View {
       HStack {
         Image(systemName: isCurrent ? "checkmark.circle.fill" : "circle")
           .foregroundStyle(isHighlighted ? highlightedText : isCurrent ? Color.accentColor : .secondary)
-        HStack {
+        HStack(alignment: .firstTextBaseline) {
           Text(worktree.name).lineLimit(1).truncationMode(.middle)
             .foregroundStyle(isHighlighted ? highlightedText : .primary)
           Spacer()
           if isPending {
             ProgressView().controlSize(.small)
           } else if let metro {
-            Text(verbatim: ":\(metro.port)").monospaced()
+            Text(verbatim: ":\(metro.port)").font(.callout).monospaced()
               .foregroundStyle(isHighlighted ? highlightedText : .secondary)
           }
         }
