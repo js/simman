@@ -122,7 +122,7 @@ struct WorktreeRow: View {
     let highlightedText = Color(nsColor: .selectedMenuItemTextColor)
 
     Button {
-      guard let metro else { return }
+      guard let metro, isSelectable else { return }
       Task { await store.point(simulator, at: metro) }
     } label: {
       HStack {
@@ -154,7 +154,9 @@ struct WorktreeRow: View {
     // stays aligned with the simulator headers.
     .padding(.horizontal, -7)
     .onHover { isHovered = $0 }
-    .disabled(!isSelectable)
+    // Only rows without a Metro are disabled; the current row stays at full strength.
+    .disabled(metro == nil)
+    .accessibilityAddTraits(isCurrent ? .isSelected : [])
     .opacity(metro == nil ? 0.4 : 1)
     .help(worktree.path.path)
     .accessibilityIdentifier("\(simulator.udid)|\(worktree.path.lastPathComponent)")
