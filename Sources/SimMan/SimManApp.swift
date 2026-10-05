@@ -54,7 +54,7 @@ struct SimulatorSection: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .firstTextBaseline) {
-        Text(simulator.name).font(.headline)
+        DeviceHubLink(simulator: simulator)
         Spacer()
         CopyUDIDButton(udid: simulator.udid)
       }
@@ -140,6 +140,41 @@ struct WorktreeRow: View {
     .opacity(metro == nil ? 0.4 : 1)
     .help(worktree.path.path)
     .accessibilityIdentifier("\(simulator.udid)|\(worktree.path.lastPathComponent)")
+  }
+}
+
+/// Device Hub (Xcode 27+) selects a device in its main window for `devices://manage/select?id=<udid>`.
+/// The route comes from DeviceKit.framework's `DeviceManagementURLActionProvider`; Apple doesn't document it.
+/// `devices://device/open` opens a separate floating window per device instead.
+struct DeviceHubLink: View {
+  let simulator: Simulator
+  @State private var isHovered = false
+
+  var body: some View {
+    Button {
+      // macOS 14+ only lets an app hand focus to another app it explicitly yields to.
+      NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.dt.Devices")
+      let configuration = NSWorkspace.OpenConfiguration()
+      configuration.activates = true
+      NSWorkspace.shared.open(
+        URL(string: "devices://manage/select?id=\(simulator.udid)")!, configuration: configuration)
+    } label: {
+      Text(simulator.name).font(.headline)
+        .foregroundStyle(isHovered ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+          RoundedRectangle(cornerRadius: 6)
+            .fill(isHovered ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
+        // Keep the text aligned with the rows; only the highlight extends past it, as on rows.
+        .padding(.horizontal, -7)
+        .padding(.vertical, -3)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovered = $0 }
+    .help("Show in Device Hub")
+    .accessibilityIdentifier("\(simulator.udid)|devicehub")
   }
 }
 
