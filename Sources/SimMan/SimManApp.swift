@@ -31,9 +31,9 @@ struct MenuContent: View {
         Text(Project.root.lastPathComponent).font(.caption).foregroundStyle(.secondary)
         Spacer()
         Button("Quit") { NSApplication.shared.terminate(nil) }
+          .buttonStyle(SubtleButtonStyle())
       }
     }
-    .monospaced()
     .padding(12)
     .frame(width: 360)
     // Poll while the window is open: switches take a few seconds to land in the dev launcher's recents,
@@ -60,8 +60,10 @@ struct SimulatorSection: View {
       }
       Text(status).font(.caption).foregroundStyle(.secondary)
       if case .installed = simulator.app {
-        ForEach(store.snapshot.worktrees) { worktree in
-          WorktreeRow(simulator: simulator, worktree: worktree)
+        VStack(spacing: 0) {
+          ForEach(store.snapshot.worktrees) { worktree in
+            WorktreeRow(simulator: simulator, worktree: worktree)
+          }
         }
       }
     }
@@ -98,6 +100,8 @@ struct WorktreeRow: View {
     let isCurrent = metro != nil && store.snapshot.metro(for: simulator) == metro
     let isPending = metro != nil && store.pendingPort(for: simulator) == metro?.port
     let isSelectable = metro != nil && !isCurrent
+    let isHighlighted = isSelectable && isHovered
+    let highlightedText = Color(nsColor: .selectedMenuItemTextColor)
 
     Button {
       guard let metro else { return }
@@ -105,23 +109,32 @@ struct WorktreeRow: View {
     } label: {
       HStack {
         Image(systemName: isCurrent ? "checkmark.circle.fill" : "circle")
-          .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
-        Text(worktree.name).lineLimit(1).truncationMode(.middle)
-        Spacer()
-        if isPending {
-          ProgressView().controlSize(.small)
-        } else if let metro {
-          Text(verbatim: ":\(metro.port)").foregroundStyle(.secondary)
+          .foregroundStyle(isHighlighted ? highlightedText : isCurrent ? Color.accentColor : .secondary)
+        HStack {
+          Text(worktree.name).lineLimit(1).truncationMode(.middle)
+            .foregroundStyle(isHighlighted ? highlightedText : .primary)
+          Spacer()
+          if isPending {
+            ProgressView().controlSize(.small)
+          } else if let metro {
+            Text(verbatim: ":\(metro.port)").monospaced()
+              .foregroundStyle(isHighlighted ? highlightedText : .secondary)
+          }
         }
+        // The line box centres cap height, which leaves lowercase branch names looking low.
+        .offset(y: -1)
       }
-      .padding(.horizontal, 4)
-      .padding(.vertical, 2)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 3)
       .background(
-        RoundedRectangle(cornerRadius: 4)
-          .fill(isSelectable && isHovered ? Color.primary.opacity(0.1) : .clear))
+        RoundedRectangle(cornerRadius: 6)
+          .fill(isHighlighted ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    // Let the highlight run out toward the window edge, as menu highlights do, while the text
+    // stays aligned with the simulator headers.
+    .padding(.horizontal, -7)
     .onHover { isHovered = $0 }
     .disabled(!isSelectable)
     .opacity(metro == nil ? 0.4 : 1)
@@ -144,9 +157,32 @@ struct CopyUDIDButton: View {
         copied = false
       }
     }
-    .buttonStyle(.bordered)
-    .controlSize(.mini)
+    .font(.caption)
+    .buttonStyle(SubtleButtonStyle())
     .help(udid)
     .accessibilityIdentifier("\(udid)|uuid")
+  }
+}
+
+/// A faint rounded fill that strengthens on hover and press. Bordered AppKit buttons show no hover state.
+struct SubtleButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HoverLabel(configuration: configuration)
+  }
+
+  private struct HoverLabel: View {
+    let configuration: Configuration
+    @State private var isHovered = false
+
+    var body: some View {
+      configuration.label
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+          RoundedRectangle(cornerRadius: 5)
+            .fill(Color.primary.opacity(configuration.isPressed ? 0.2 : isHovered ? 0.12 : 0.06)))
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
   }
 }
