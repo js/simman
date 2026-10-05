@@ -5,9 +5,11 @@ A menu bar app that shows which elton-app worktree each booted iOS simulator is 
 ## Install
 
 ```sh
-./scripts/bundle.sh --install   # builds and copies SimMan.app to ~/Applications
-open ~/Applications/SimMan.app
+make install    # release build, copied to /Applications (asks for sudo if needed)
+open /Applications/SimMan.app
 ```
+
+For development, `make build` bundles a debug build into `build/debug/SimMan.app`, and `make run` builds it and relaunches it.
 
 ## What it shows
 
