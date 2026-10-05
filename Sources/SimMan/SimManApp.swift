@@ -200,17 +200,29 @@ struct DeviceHubLink: View {
 
 struct SimulatorDetails: View {
   let simulator: Simulator
+  /// Every title the buttons below can show, so they all reserve the same width.
+  private let buttonTitles = ["copy", "copied", "set", "done", FeedbackButton.failedTitle]
 
   var body: some View {
     let location = Project.simulatedLocation
     Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+      GridRow {
+        Text("Screenshot").foregroundStyle(.secondary)
+        Spacer()
+        FeedbackButton(title: "copy", doneTitle: "copied", widthOf: buttonTitles) {
+          let png = try await Discovery.screenshot(of: simulator)
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setData(png, forType: .png)
+        }
+        .accessibilityIdentifier("\(simulator.udid)|copy-screenshot")
+      }
       GridRow {
         Text("UUID").foregroundStyle(.secondary)
         Text(verbatim: simulator.udid)
           .lineLimit(1).truncationMode(.middle)
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
-        FeedbackButton(title: "copy", doneTitle: "copied") {
+        FeedbackButton(title: "copy", doneTitle: "copied", widthOf: buttonTitles) {
           NSPasteboard.general.clearContents()
           NSPasteboard.general.setString(simulator.udid, forType: .string)
         }
@@ -222,20 +234,10 @@ struct SimulatorDetails: View {
         // Verbatim, so the locale can't turn the decimal points into commas.
         Text(verbatim: "\(location.latitude), \(location.longitude)")
           .textSelection(.enabled)
-        FeedbackButton(title: "set", doneTitle: "done") {
+        FeedbackButton(title: "set", doneTitle: "done", widthOf: buttonTitles) {
           try await Discovery.setLocation(of: simulator, latitude: location.latitude, longitude: location.longitude)
         }
         .accessibilityIdentifier("\(simulator.udid)|set-location")
-      }
-      GridRow {
-        Text("Screenshot").foregroundStyle(.secondary)
-        Spacer()
-        FeedbackButton(title: "copy", doneTitle: "copied") {
-          let png = try await Discovery.screenshot(of: simulator)
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setData(png, forType: .png)
-        }
-        .accessibilityIdentifier("\(simulator.udid)|copy-screenshot")
       }
     }
     .font(.caption)
@@ -243,26 +245,35 @@ struct SimulatorDetails: View {
 }
 
 /// A small button that briefly swaps its title for `doneTitle`, or "failed", once its action finishes.
+/// Its label is as wide as the widest of `widthOf`, so swapping titles doesn't resize it.
 struct FeedbackButton: View {
+  static let failedTitle = "failed"
+
   let title: String
   let doneTitle: String
+  let widthOf: [String]
   let action: () async throws -> Void
   @State private var outcome: String?
   @State private var isRunning = false
 
   var body: some View {
-    Button(outcome ?? title) {
+    Button {
       isRunning = true
       Task {
         do {
           try await action()
           outcome = doneTitle
         } catch {
-          outcome = "failed"
+          outcome = Self.failedTitle
         }
         isRunning = false
         try? await Task.sleep(for: .seconds(1))
         outcome = nil
+      }
+    } label: {
+      ZStack {
+        ForEach(widthOf, id: \.self) { Text($0).hidden() }
+        Text(outcome ?? title)
       }
     }
     .disabled(isRunning)
