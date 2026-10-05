@@ -25,6 +25,15 @@ enum Discovery {
     _ = try await run("/usr/bin/xcrun", "simctl", "location", simulator.udid, "set", "\(latitude),\(longitude)")
   }
 
+  /// The full device framebuffer as PNG, unmasked, so rounded-corner displays come out rectangular.
+  /// simctl's help offers "-" for stdout, but Xcode 27's simctl writes a file named "-" instead.
+  static func screenshot(of simulator: Simulator) async throws -> Data {
+    let file = FileManager.default.temporaryDirectory.appending(path: "simman-\(UUID().uuidString).png")
+    defer { try? FileManager.default.removeItem(at: file) }
+    _ = try await run("/usr/bin/xcrun", "simctl", "io", simulator.udid, "screenshot", file.path)
+    return try Data(contentsOf: file)
+  }
+
   // MARK: Worktrees
 
   static func worktrees() async throws -> [Worktree] {

@@ -220,6 +220,16 @@ struct SimulatorDetails: View {
         }
         .accessibilityIdentifier("\(simulator.udid)|set-location")
       }
+      GridRow {
+        Text("Screenshot").foregroundStyle(.secondary)
+        Spacer()
+        FeedbackButton(title: "copy", doneTitle: "copied") {
+          let png = try await Discovery.screenshot(of: simulator)
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setData(png, forType: .png)
+        }
+        .accessibilityIdentifier("\(simulator.udid)|copy-screenshot")
+      }
     }
     .font(.caption)
   }
