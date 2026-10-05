@@ -23,5 +23,9 @@ if CommandLine.arguments.contains("--dump") {
   else { fatalError("render failed") }
   try png.write(to: URL(filePath: CommandLine.arguments[flag + 1]))
 } else {
-  SimManApp.main()
+  // Plain AppKit entry rather than a SwiftUI App: an App needs at least one scene, and SwiftUI opens
+  // even a placeholder Settings scene as a window at launch.
+  let delegate = AppDelegate()
+  NSApplication.shared.delegate = delegate
+  NSApplication.shared.run()
 }

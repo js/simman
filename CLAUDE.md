@@ -11,9 +11,9 @@
 
 - `.build/debug/SimMan --dump` prints the snapshot the menu renders.
 - `screencapture` fails here because the terminal has no Screen Recording permission. Instead, `.build/debug/SimMan --render <file.png>` draws the menu offscreen. AppKit-backed controls render as placeholders. To render a hover state, temporarily initialise `isHovered` to true, and revert it before building the app.
-- Drive the live menu with System Events (`click menu bar item 1 of menu bar 2` of process "SimMan").
-  - The window closes between `osascript` runs, so open it and act on it in one script. Check `count of windows` first, because a click can toggle the window shut.
+- The menu is a FluidMenuBarExtra panel, which opens only on a real left mouse-down on the status item. System Events' `click` (an AXPress) does nothing, so the menu can't be opened by script without moving the user's pointer. Once it's open, its SwiftUI buttons respond to `perform action "AXPress"`.
   - Index into `entire contents`. Element references from `repeat with e in …` read every attribute as empty.
-- Rows carry the accessibility identifier `<udid>|<worktree dir name>`, and uuid buttons `<udid>|uuid`. Check the identifier before clicking a row, since a click relaunches the app in that simulator.
+  - System Events can report 0 windows for an app whose windows CoreGraphics lists on screen. Cross-check with `CGWindowListCopyWindowInfo` filtered by owner PID.
+- Controls carry accessibility identifiers. Worktree rows are `<udid>|<worktree dir name>`. Per simulator there are also `<udid>|devicehub`, `|details`, `|copy-uuid`, `|set-location` and `|copy-screenshot`. Check the identifier before pressing a row, since that relaunches the app in that simulator.
 - Test switching only on a simulator you created. "🤖 AGENT — do not touch" is driven by other agents, and the user works in "iPhone 17". "simman test" (49ACE056-FEA0-4004-8E71-05A36C637415) was made for testing SimMan. If it's gone, create one and install the Elton dev build from another simulator's `simctl get_app_container <udid> no.vg.lab.zapp app`.
 - The user's locale groups digits with spaces. Interpolating numbers into `Text("…")` renders `:8 082`, so use `Text(verbatim:)`.

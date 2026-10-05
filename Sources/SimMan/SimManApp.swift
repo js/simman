@@ -1,19 +1,23 @@
+import FluidMenuBarExtra
 import SwiftUI
 
-struct SimManApp: App {
-  @State private var store = Store()
+/// SwiftUI's MenuBarExtra window doesn't shrink when its content does, and its resizes jump.
+/// FluidMenuBarExtra hosts the content in its own panel that animates to fit.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  private let store = Store()
+  private var menuBarExtra: FluidMenuBarExtra?
 
-  var body: some Scene {
-    MenuBarExtra("SimMan", systemImage: "iphone.gen3") {
-      MenuContent()
-        .environment(store)
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    menuBarExtra = FluidMenuBarExtra(title: "SimMan", systemImage: "iphone.gen3") { [store] in
+      MenuContent().environment(store)
     }
-    .menuBarExtraStyle(.window)
   }
 }
 
 struct MenuContent: View {
   @Environment(Store.self) private var store
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -36,9 +40,10 @@ struct MenuContent: View {
     }
     .padding(12)
     .frame(width: 360)
-    // Poll while the window is open: switches take a few seconds to land in the dev launcher's recents,
-    // and Metro servers come and go.
-    .task {
+    // Poll while the menu is open: switches take a few seconds to land in the dev launcher's recents,
+    // and Metro servers come and go. The panel keeps this view alive while closed, so key off its phase.
+    .task(id: scenePhase) {
+      guard scenePhase == .active else { return }
       while !Task.isCancelled {
         await store.refresh()
         try? await Task.sleep(for: .seconds(2))
