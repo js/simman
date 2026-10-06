@@ -2,8 +2,11 @@ import SwiftUI
 
 // `SimMan --dump` prints what the menu would show, for checking discovery from a terminal.
 // `SimMan --render <file.png>` draws the menu itself, for checking layout without screen capture.
+// Run them from the app bundle, so they read the app's settings.
 if CommandLine.arguments.contains("--dump") {
-  let snapshot = try await Discovery.snapshot()
+  guard let project = Settings().project else { fatalError("no project chosen in Settings") }
+  print("project \(project.root.path) \(project.bundleID)")
+  let snapshot = try await Discovery.snapshot(of: project)
   for metro in snapshot.metros {
     print("metro :\(metro.port) pid \(metro.pid) -> \(metro.worktree.name)")
   }

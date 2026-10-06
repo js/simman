@@ -3,6 +3,9 @@ import Observation
 
 @MainActor @Observable
 final class Store {
+  let settings = Settings()
+  /// The project `snapshot` was read for.
+  private var snapshotProject: Project?
   private(set) var snapshot = Snapshot()
   private(set) var error: String?
   /// When `snapshot` was last read from the host; nil until the first refresh succeeds.
@@ -17,13 +20,30 @@ final class Store {
   }
 
   func refresh() async {
+    let project = settings.project
+    if project != snapshotProject {
+      // Show the loading state rather than the previous project's worktrees.
+      snapshot = Snapshot()
+      snapshotProject = project
+      loadedAt = nil
+      error = nil
+      pending = [:]
+    }
+    guard let project else {
+      loadedAt = .now
+      return
+    }
     isRefreshing = true
     defer { isRefreshing = false }
     do {
-      snapshot = try await Discovery.snapshot()
+      let snapshot = try await Discovery.snapshot(of: project)
+      // The project may have changed while this one was being read.
+      guard project == settings.project else { return }
+      self.snapshot = snapshot
       loadedAt = .now
       error = nil
     } catch {
+      guard project == settings.project else { return }
       self.error = String(describing: error)
     }
     for simulator in snapshot.simulators {
@@ -39,9 +59,10 @@ final class Store {
   }
 
   func point(_ simulator: Simulator, at metro: MetroServer) async {
+    guard let project = snapshotProject else { return }
     pending[simulator.id] = (metro.port, .now)
     do {
-      try await Discovery.point(simulator, at: metro)
+      try await Discovery.point(simulator, at: metro, bundleID: project.bundleID)
     } catch {
       pending[simulator.id] = nil
       self.error = String(describing: error)

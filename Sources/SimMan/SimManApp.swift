@@ -7,13 +7,53 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let store = Store()
   private var menuBarExtra: FluidMenuBarExtra?
+  private var settingsWindow: NSWindow?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.mainMenu = Self.mainMenu()
     menuBarExtra = FluidMenuBarExtra(title: "SimMan", systemImage: "iphone.gen3") { [store] in
       MenuContent().environment(store)
     }
     // Load once up front so the first open usually has simulators to show.
     Task { await store.refresh() }
+    // On first launch, or when the saved folder has moved, the menu has nothing to show without a project.
+    if store.settings.project == nil {
+      showSettings(nil)
+    }
+  }
+
+  /// Reached through the responder chain, which ends at the app delegate.
+  @objc func showSettings(_ sender: Any?) {
+    if settingsWindow == nil {
+      let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView().environment(store)))
+      window.title = "SimMan Settings"
+      window.styleMask = [.titled, .closable]
+      window.isReleasedWhenClosed = false
+      window.center()
+      settingsWindow = window
+    }
+    NSApp.activate()
+    settingsWindow?.makeKeyAndOrderFront(nil)
+  }
+
+  /// An accessory app shows no menu bar, but its main menu still supplies key equivalents,
+  /// such as ⌘V in text fields and ⌘W to close a window.
+  private static func mainMenu() -> NSMenu {
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    let window = NSMenu(title: "Window")
+    window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+    let menu = NSMenu()
+    for submenu in [edit, window] {
+      menu.addItem(withTitle: submenu.title, action: nil, keyEquivalent: "").submenu = submenu
+    }
+    return menu
   }
 }
 
@@ -23,7 +63,9 @@ struct MenuContent: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      if store.loadedAt == nil && store.error == nil {
+      if store.settings.project == nil {
+        Text("Choose an Expo project in Settings").foregroundStyle(.secondary)
+      } else if store.loadedAt == nil && store.error == nil {
         HStack(spacing: 6) {
           ProgressView().controlSize(.small)
           Text("Loading simulators…").foregroundStyle(.secondary)
@@ -39,7 +81,15 @@ struct MenuContent: View {
       }
       Divider()
       HStack {
-        Text(Project.root.lastPathComponent).font(.caption).foregroundStyle(.secondary)
+        Text(verbatim: store.settings.project?.name ?? "No project").font(.caption).foregroundStyle(.secondary)
+        Button {
+          NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
+        } label: {
+          Image(systemName: "gearshape").font(.caption)
+        }
+        .buttonStyle(SubtleButtonStyle())
+        .help("Settings")
+        .accessibilityIdentifier("settings")
         if store.loadedAt != nil && store.isRefreshing && store.isStale {
           ProgressView().controlSize(.mini)
           Text("Refreshing…").font(.caption).foregroundStyle(.secondary)
@@ -101,7 +151,7 @@ struct SimulatorSection: View {
   private var status: String {
     switch simulator.app {
     case .notInstalled:
-      return "Elton not installed"
+      return "App not installed"
     case .installed(let url, let running):
       let target: String
       if let port = store.pendingPort(for: simulator) {
@@ -210,12 +260,13 @@ struct DeviceHubLink: View {
 }
 
 struct SimulatorDetails: View {
+  @Environment(Store.self) private var store
   let simulator: Simulator
   /// Every title the buttons below can show, so they all reserve the same width.
   private let buttonTitles = ["copy", "copied", "set", "done", FeedbackButton.failedTitle]
 
   var body: some View {
-    let location = Project.simulatedLocation
+    let location = store.settings.location
     Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
       GridRow {
         Text("Screenshot").foregroundStyle(.secondary)
@@ -242,11 +293,10 @@ struct SimulatorDetails: View {
       }
       GridRow {
         Text("Location").foregroundStyle(.secondary)
-        // Verbatim, so the locale can't turn the decimal points into commas.
-        Text(verbatim: "\(location.latitude), \(location.longitude)")
+        Text(verbatim: location.text)
           .textSelection(.enabled)
         FeedbackButton(title: "set", doneTitle: "done", widthOf: buttonTitles) {
-          try await Discovery.setLocation(of: simulator, latitude: location.latitude, longitude: location.longitude)
+          try await Discovery.setLocation(of: simulator, to: location)
         }
         .accessibilityIdentifier("\(simulator.udid)|set-location")
       }

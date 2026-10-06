@@ -3,10 +3,10 @@ import Foundation
 /// Reads worktrees, Metro servers and simulators from the host. Every query shells out,
 /// so a snapshot always reflects the machine as it is right now.
 enum Discovery {
-  static func snapshot() async throws -> Snapshot {
-    let worktrees = try await worktrees()
+  static func snapshot(of project: Project) async throws -> Snapshot {
+    let worktrees = try await worktrees(of: project)
     async let metros = metros(in: worktrees)
-    async let simulators = simulators()
+    async let simulators = simulators(bundleID: project.bundleID)
     return try await Snapshot(worktrees: worktrees, metros: metros, simulators: simulators)
   }
 
@@ -14,15 +14,16 @@ enum Discovery {
   /// (EXDevLauncherController.m, `initialUrlFromProcessInfo`). The `exp+elton://expo-development-client`
   /// deep link would avoid the restart, but Elton's PhoneSceneDelegate hands warm-start URLs to
   /// RCTLinkingManager directly, so the dev launcher never sees them.
-  static func point(_ simulator: Simulator, at metro: MetroServer) async throws {
+  static func point(_ simulator: Simulator, at metro: MetroServer, bundleID: String) async throws {
     _ = try await run(
-      "/usr/bin/xcrun", "simctl", "launch", "--terminate-running-process", simulator.udid, Project.bundleID,
+      "/usr/bin/xcrun", "simctl", "launch", "--terminate-running-process", simulator.udid, bundleID,
       "--initialUrl", "http://127.0.0.1:\(metro.port)")
   }
 
-  static func setLocation(of simulator: Simulator, latitude: Double, longitude: Double) async throws {
+  static func setLocation(of simulator: Simulator, to location: Location) async throws {
     // simctl wants `lat,lon` with '.' decimals; Double interpolation is locale-independent.
-    _ = try await run("/usr/bin/xcrun", "simctl", "location", simulator.udid, "set", "\(latitude),\(longitude)")
+    _ = try await run(
+      "/usr/bin/xcrun", "simctl", "location", simulator.udid, "set", "\(location.latitude),\(location.longitude)")
   }
 
   /// The full device framebuffer as PNG, unmasked, so rounded-corner displays come out rectangular.
@@ -36,8 +37,8 @@ enum Discovery {
 
   // MARK: Worktrees
 
-  static func worktrees() async throws -> [Worktree] {
-    let output = try await run("/usr/bin/git", "-C", Project.root.path, "worktree", "list", "--porcelain")
+  static func worktrees(of project: Project) async throws -> [Worktree] {
+    let output = try await run("/usr/bin/git", "-C", project.root.path, "worktree", "list", "--porcelain")
     return output.components(separatedBy: "\n\n").compactMap { block in
       var path: URL?
       var branch: String?
@@ -117,12 +118,14 @@ enum Discovery {
     let devices: [String: [Device]]
   }
 
-  static func simulators() async throws -> [Simulator] {
+  static func simulators(bundleID: String) async throws -> [Simulator] {
     let json = try await run("/usr/bin/xcrun", "simctl", "list", "devices", "booted", "-j")
     let devices = try JSONDecoder().decode(DeviceList.self, from: Data(json.utf8)).devices.values.joined()
     return await withTaskGroup(of: Simulator.self) { group in
       for device in devices {
-        group.addTask { Simulator(udid: device.udid, name: device.name, app: await appState(on: device.udid)) }
+        group.addTask {
+          Simulator(udid: device.udid, name: device.name, app: await appState(of: bundleID, on: device.udid))
+        }
       }
       var simulators: [Simulator] = []
       for await simulator in group { simulators.append(simulator) }
@@ -134,17 +137,17 @@ enum Discovery {
   /// `expo.devlauncher.recentlyopenedapps` in the app's own defaults. The newest entry is the
   /// Metro the app is on. Open sockets don't work for this: an app switched through the dev menu
   /// keeps connections to the Metro it left.
-  private static func appState(on udid: String) async -> AppState {
+  private static func appState(of bundleID: String, on udid: String) async -> AppState {
     guard let container = try? await run(
-      "/usr/bin/xcrun", "simctl", "get_app_container", udid, Project.bundleID, "data")
+      "/usr/bin/xcrun", "simctl", "get_app_container", udid, bundleID, "data")
     else { return .notInstalled }
 
-    let prefs = container.trimmingCharacters(in: .whitespacesAndNewlines) + "/Library/Preferences/" + Project.bundleID
+    let prefs = container.trimmingCharacters(in: .whitespacesAndNewlines) + "/Library/Preferences/" + bundleID
     // Read through the simulator's cfprefsd rather than the plist file, which can lag behind.
     async let exported = try? run("/usr/bin/xcrun", "simctl", "spawn", udid, "defaults", "export", prefs, "-")
     async let services = try? run("/usr/bin/xcrun", "simctl", "spawn", udid, "launchctl", "list")
 
-    let running = await services?.contains("UIKitApplication:\(Project.bundleID)[") ?? false
+    let running = await services?.contains("UIKitApplication:\(bundleID)[") ?? false
     return .installed(bundleURL: await exported.flatMap(lastOpenedURL), running: running)
   }
 
