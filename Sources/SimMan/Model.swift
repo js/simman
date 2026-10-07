@@ -102,6 +102,8 @@ enum AppState: Hashable, Sendable {
 struct Simulator: Identifiable, Hashable, Sendable {
   let udid: String
   let name: String
+  /// The runtime, e.g. "iOS 26.5".
+  let os: String
   let app: AppState
 
   var id: String { udid }
@@ -114,6 +116,11 @@ struct Snapshot: Sendable {
 
   func metro(for worktree: Worktree) -> MetroServer? {
     metros.first { $0.worktree == worktree }
+  }
+
+  /// True when another simulator has the same name and OS, so only the udid tells them apart.
+  func isAmbiguous(_ simulator: Simulator) -> Bool {
+    simulators.contains { $0.udid != simulator.udid && $0.name == simulator.name && $0.os == simulator.os }
   }
 
   func metro(for simulator: Simulator) -> MetroServer? {

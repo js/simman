@@ -120,17 +120,29 @@ enum Discovery {
 
   static func simulators(bundleID: String) async throws -> [Simulator] {
     let json = try await run("/usr/bin/xcrun", "simctl", "list", "devices", "booted", "-j")
-    let devices = try JSONDecoder().decode(DeviceList.self, from: Data(json.utf8)).devices.values.joined()
+    let runtimes = try JSONDecoder().decode(DeviceList.self, from: Data(json.utf8)).devices
     return await withTaskGroup(of: Simulator.self) { group in
-      for device in devices {
-        group.addTask {
-          Simulator(udid: device.udid, name: device.name, app: await appState(of: bundleID, on: device.udid))
+      for (runtime, devices) in runtimes {
+        for device in devices {
+          group.addTask {
+            Simulator(
+              udid: device.udid, name: device.name, os: osName(ofRuntime: runtime),
+              app: await appState(of: bundleID, on: device.udid))
+          }
         }
       }
       var simulators: [Simulator] = []
       for await simulator in group { simulators.append(simulator) }
-      return simulators.sorted { $0.name < $1.name }
+      // Same-named simulators are common, so tie-break on udid to keep the order stable between polls.
+      return simulators.sorted { ($0.name, $0.udid) < ($1.name, $1.udid) }
     }
+  }
+
+  /// "com.apple.CoreSimulator.SimRuntime.iOS-26-5" reads as "iOS 26.5".
+  private static func osName(ofRuntime identifier: String) -> String {
+    let parts = identifier.split(separator: ".").last?.split(separator: "-") ?? []
+    guard let platform = parts.first else { return identifier }
+    return "\(platform) \(parts.dropFirst().joined(separator: "."))"
   }
 
   /// The dev launcher records every bundle URL it loads, with a timestamp, under

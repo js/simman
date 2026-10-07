@@ -73,8 +73,8 @@ struct MenuContent: View {
       } else if store.snapshot.simulators.isEmpty {
         Text("No booted simulators").foregroundStyle(.secondary)
       }
-      ForEach(store.snapshot.simulators) { simulator in
-        SimulatorSection(simulator: simulator)
+      if !store.snapshot.simulators.isEmpty {
+        SimulatorList()
       }
       if let error = store.error {
         Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
@@ -113,16 +113,49 @@ struct MenuContent: View {
   }
 }
 
+/// Scrolls once the simulators would make the panel taller than the screen.
+struct SimulatorList: View {
+  @Environment(Store.self) private var store
+  @State private var contentHeight: CGFloat = 0
+
+  var body: some View {
+    // Leave room for the footer and a margin above the Dock.
+    let maxHeight = (NSScreen.main?.visibleFrame.height ?? 800) - 120
+    ScrollView {
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(Array(store.snapshot.simulators.enumerated()), id: \.element.id) { index, simulator in
+          if index > 0 { Divider() }
+          SimulatorSection(simulator: simulator)
+        }
+      }
+      // Inset inside the scroll view, so row highlights that reach past the text aren't clipped.
+      .padding(.horizontal, 12)
+      .padding(.vertical, 3)
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+    }
+    .scrollBounceBehavior(.basedOnSize)
+    .frame(height: min(contentHeight, maxHeight))
+    .padding(.horizontal, -12)
+    .padding(.vertical, -3)
+  }
+}
+
 struct SimulatorSection: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
   @State private var showsDetails = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline) {
-        DeviceHubLink(simulator: simulator)
+    VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        VStack(alignment: .leading, spacing: 2) {
+          DeviceHubLink(simulator: simulator)
+          Text(verbatim: subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
         Spacer()
+        if case .installed = simulator.app {
+          WorktreePicker(simulator: simulator).frame(width: 170)
+        }
         Button {
           showsDetails.toggle()
         } label: {
@@ -134,93 +167,76 @@ struct SimulatorSection: View {
         .help(showsDetails ? "Hide details" : "Show details")
         .accessibilityIdentifier("\(simulator.udid)|details")
       }
-      Text(status).font(.caption).foregroundStyle(.secondary)
       if showsDetails {
         SimulatorDetails(simulator: simulator)
       }
-      if case .installed = simulator.app {
-        VStack(spacing: 0) {
-          ForEach(store.snapshot.worktrees) { worktree in
-            WorktreeRow(simulator: simulator, worktree: worktree)
-          }
-        }
-      }
     }
   }
 
-  private var status: String {
+  /// The OS, and whatever the picker's selection doesn't already say.
+  private var subtitle: String {
+    var parts = [simulator.os]
+    if store.snapshot.isAmbiguous(simulator) {
+      parts.append(String(simulator.udid.prefix(4)))
+    }
     switch simulator.app {
     case .notInstalled:
-      return "App not installed"
-    case .installed(let url, let running):
-      let target: String
+      parts.append("App not installed")
+    case .installed(_, let running):
       if let port = store.pendingPort(for: simulator) {
-        target = "Loading :\(port)…"
-      } else if let metro = store.snapshot.metro(for: simulator) {
-        target = "\(metro.worktree.name) on :\(metro.port)"
-      } else if let port = url?.port {
-        target = "Last on :\(port), no Metro running"
-      } else {
-        target = "Never loaded a bundle"
+        parts.append("Loading :\(port)…")
       }
-      return running ? target : "\(target) (not running)"
+      if !running {
+        parts.append("Not running")
+      }
     }
+    return parts.joined(separator: " · ")
   }
 }
 
-struct WorktreeRow: View {
+/// A pop-up of the project's worktrees: those with a running Metro, then the rest, dimmed.
+/// Picking a Metro relaunches the app in the simulator, pointed at it.
+struct WorktreePicker: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
-  let worktree: Worktree
-  @State private var isHovered = false
 
   var body: some View {
-    let metro = store.snapshot.metro(for: worktree)
-    let isCurrent = metro != nil && store.snapshot.metro(for: simulator) == metro
-    let isPending = metro != nil && store.pendingPort(for: simulator) == metro?.port
-    let isSelectable = metro != nil && !isCurrent
-    let isHighlighted = isSelectable && isHovered
-    let highlightedText = Color(nsColor: .selectedMenuItemTextColor)
+    let snapshot = store.snapshot
+    let current = snapshot.metro(for: simulator)
+    let idle = snapshot.worktrees.filter { snapshot.metro(for: $0) == nil }
+    let selection = Binding<Int?>(
+      get: { store.pendingPort(for: simulator) ?? current?.port },
+      set: { port in
+        guard let metro = snapshot.metros.first(where: { $0.port == port }), metro != current else { return }
+        Task { await store.point(simulator, at: metro) }
+      })
 
-    Button {
-      guard let metro, isSelectable else { return }
-      Task { await store.point(simulator, at: metro) }
-    } label: {
-      HStack {
-        Image(systemName: isCurrent ? "checkmark.circle.fill" : "circle")
-          .foregroundStyle(isHighlighted ? highlightedText : isCurrent ? Color.accentColor : .secondary)
-        HStack(alignment: .firstTextBaseline) {
-          Text(worktree.name).lineLimit(1).truncationMode(.middle)
-            .foregroundStyle(isHighlighted ? highlightedText : .primary)
-          Spacer()
-          if isPending {
-            ProgressView().controlSize(.small)
-          } else if let metro {
-            Text(verbatim: ":\(metro.port)").font(.callout).monospaced()
-              .foregroundStyle(isHighlighted ? highlightedText : .secondary)
+    Picker(selection: selection) {
+      if selection.wrappedValue == nil {
+        Text(verbatim: placeholder).tag(Int?.none)
+      }
+      ForEach(snapshot.metros) { metro in
+        Text(verbatim: "\(metro.worktree.name)  :\(metro.port)").tag(Int?.some(metro.port))
+      }
+      if !idle.isEmpty {
+        Section("No Metro running") {
+          // Negative tags never match a port, and the setter ignores them.
+          ForEach(Array(idle.enumerated()), id: \.element.id) { index, worktree in
+            Text(verbatim: worktree.name).tag(Int?.some(-1 - index)).selectionDisabled()
           }
         }
-        // The line box centres cap height, which leaves lowercase branch names looking low.
-        .offset(y: -1)
       }
-      .padding(.horizontal, 7)
-      .padding(.vertical, 3)
-      .background(
-        RoundedRectangle(cornerRadius: 6)
-          .fill(isHighlighted ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
-      .contentShape(Rectangle())
+    } label: {
+      EmptyView()
     }
-    .buttonStyle(.plain)
-    // Let the highlight run out toward the window edge, as menu highlights do, while the text
-    // stays aligned with the simulator headers.
-    .padding(.horizontal, -7)
-    .onHover { isHovered = $0 }
-    // Only rows without a Metro are disabled; the current row stays at full strength.
-    .disabled(metro == nil)
-    .accessibilityAddTraits(isCurrent ? .isSelected : [])
-    .opacity(metro == nil ? 0.4 : 1)
-    .help(worktree.path.path)
-    .accessibilityIdentifier("\(simulator.udid)|\(worktree.path.lastPathComponent)")
+    .labelsHidden()
+    .accessibilityIdentifier("\(simulator.udid)|worktree")
+  }
+
+  /// Shown while the simulator isn't on a running Metro.
+  private var placeholder: String {
+    guard case .installed(let url?, _) = simulator.app, let port = url.port else { return "Choose…" }
+    return "No Metro on :\(port)"
   }
 }
 
@@ -240,7 +256,7 @@ struct DeviceHubLink: View {
       NSWorkspace.shared.open(
         URL(string: "devices://manage/select?id=\(simulator.udid)")!, configuration: configuration)
     } label: {
-      Text(simulator.name).font(.headline)
+      Text(simulator.name).font(.headline).lineLimit(1)
         .foregroundStyle(isHovered ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
