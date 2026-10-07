@@ -117,15 +117,18 @@ struct MenuContent: View {
 struct SimulatorList: View {
   @Environment(Store.self) private var store
   @State private var contentHeight: CGFloat = 0
+  /// One simulator is open at a time, so the list stays short.
+  @State private var expanded: Simulator.ID?
 
   var body: some View {
     // Leave room for the footer and a margin above the Dock.
     let maxHeight = (NSScreen.main?.visibleFrame.height ?? 800) - 120
     ScrollView {
-      VStack(alignment: .leading, spacing: 12) {
-        ForEach(Array(store.snapshot.simulators.enumerated()), id: \.element.id) { index, simulator in
-          if index > 0 { Divider() }
-          SimulatorSection(simulator: simulator)
+      VStack(alignment: .leading, spacing: 4) {
+        ForEach(store.snapshot.simulators) { simulator in
+          SimulatorSection(
+            simulator: simulator,
+            isExpanded: Binding(get: { expanded == simulator.id }, set: { expanded = $0 ? simulator.id : nil }))
         }
       }
       // Inset inside the scroll view, so row highlights that reach past the text aren't clipped.
@@ -143,147 +146,252 @@ struct SimulatorList: View {
 struct SimulatorSection: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
-  @State private var showsDetails = false
+  @Binding var isExpanded: Bool
+  @State private var showsIdle = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        VStack(alignment: .leading, spacing: 2) {
-          DeviceHubLink(simulator: simulator)
-          Text(verbatim: subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+    VStack(alignment: .leading, spacing: 4) {
+      SimulatorHeader(simulator: simulator, isExpanded: $isExpanded)
+      if isExpanded {
+        VStack(alignment: .leading, spacing: 12) {
+          if case .installed = simulator.app {
+            worktrees
+          }
+          SimulatorDetails(simulator: simulator)
         }
-        Spacer()
-        if case .installed = simulator.app {
-          WorktreePicker(simulator: simulator).frame(width: 170)
-        }
-        Button {
-          showsDetails.toggle()
-        } label: {
-          Image(systemName: "chevron.right")
-            .font(.caption.weight(.semibold))
-            .rotationEffect(.degrees(showsDetails ? 90 : 0))
-        }
-        .buttonStyle(SubtleButtonStyle())
-        .help(showsDetails ? "Hide details" : "Show details")
-        .accessibilityIdentifier("\(simulator.udid)|details")
-      }
-      if showsDetails {
-        SimulatorDetails(simulator: simulator)
+        // Line up with the name, past the icon.
+        .padding(.leading, DeviceIcon.size + 10)
+        .padding(.bottom, 8)
       }
     }
   }
 
-  /// The OS, and whatever the picker's selection doesn't already say.
+  /// Worktrees with a running Metro, then the rest behind a disclosure.
+  @ViewBuilder private var worktrees: some View {
+    let snapshot = store.snapshot
+    let live = snapshot.worktrees.filter { snapshot.metro(for: $0) != nil }
+    let idle = snapshot.worktrees.filter { snapshot.metro(for: $0) == nil }
+    VStack(alignment: .leading, spacing: 0) {
+      if live.isEmpty {
+        Text("No Metro running").font(.caption).foregroundStyle(.secondary)
+      }
+      ForEach(live) { WorktreeRow(simulator: simulator, worktree: $0) }
+      if !idle.isEmpty {
+        Button {
+          showsIdle.toggle()
+        } label: {
+          HStack(spacing: 4) {
+            Text(verbatim: "+ \(idle.count) worktrees without Metro")
+            Image(systemName: "chevron.right")
+              .font(.caption2.weight(.semibold))
+              .rotationEffect(.degrees(showsIdle ? 90 : 0))
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(.vertical, 3)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(simulator.udid)|idle")
+        if showsIdle {
+          ForEach(idle) { WorktreeRow(simulator: simulator, worktree: $0) }
+        }
+      }
+    }
+  }
+}
+
+/// A device glyph in a circle, filled with the accent colour while the app runs on a live Metro,
+/// so the simulators that are connected stand out when scanning the list.
+struct DeviceIcon: View {
+  static let size: CGFloat = 26
+
+  @Environment(Store.self) private var store
+  let simulator: Simulator
+  let isHighlighted: Bool
+
+  var body: some View {
+    let isConnected: Bool = {
+      guard case .installed(_, running: true) = simulator.app else { return false }
+      return store.snapshot.metro(for: simulator) != nil
+    }()
+    let fill: Color = isHighlighted ? .white.opacity(isConnected ? 0.35 : 0.15)
+      : isConnected ? .accentColor : .primary.opacity(0.08)
+    Image(systemName: simulator.name.contains("iPad") ? "ipad" : "iphone")
+      .font(.system(size: 13, weight: .medium))
+      .foregroundStyle(isConnected || isHighlighted ? Color.white : .secondary)
+      .frame(width: Self.size, height: Self.size)
+      .background(Circle().fill(fill))
+  }
+}
+
+/// The simulator's row: name, OS and the worktree it's on. Clicking it expands the section.
+struct SimulatorHeader: View {
+  @Environment(Store.self) private var store
+  let simulator: Simulator
+  @Binding var isExpanded: Bool
+  @State private var isHovered = false
+
+  var body: some View {
+    let highlightedText = Color(nsColor: .selectedMenuItemTextColor)
+    Button {
+      isExpanded.toggle()
+    } label: {
+      HStack(spacing: 8) {
+        DeviceIcon(simulator: simulator, isHighlighted: isHovered)
+          .padding(.trailing, 2)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(simulator.name).font(.headline).lineLimit(1)
+          Text(verbatim: subtitle).font(.caption)
+            .foregroundStyle(isHovered ? highlightedText : .secondary)
+            .lineLimit(1)
+        }
+        Spacer(minLength: 8)
+        target
+          .foregroundStyle(isHovered ? AnyShapeStyle(highlightedText) : AnyShapeStyle(.tertiary))
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(isHovered ? highlightedText : .secondary)
+          .rotationEffect(.degrees(isExpanded ? 90 : 0))
+      }
+      .foregroundStyle(isHovered ? highlightedText : .primary)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 5)
+      .background(
+        RoundedRectangle(cornerRadius: 8)
+          .fill(isHovered ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    // As on worktree rows, the highlight runs past the text toward the window edge.
+    .padding(.horizontal, -7)
+    .onHover { isHovered = $0 }
+    .accessibilityIdentifier("\(simulator.udid)|expand")
+  }
+
+  /// The worktree the simulator is on, or why it isn't on one.
+  @ViewBuilder private var target: some View {
+    switch simulator.app {
+    case .notInstalled:
+      Text("App not installed")
+    case .installed(let url, _):
+      if let port = store.pendingPort(for: simulator) {
+        HStack(spacing: 6) {
+          ProgressView().controlSize(.small)
+          Text(verbatim: ":\(port)").font(.callout).monospaced()
+        }
+      } else if let metro = store.snapshot.metro(for: simulator) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Text(metro.worktree.name).lineLimit(1).truncationMode(.middle)
+            .foregroundStyle(isHovered ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
+          Text(verbatim: ":\(metro.port)").font(.callout).monospaced()
+            .foregroundStyle(isHovered ? AnyShapeStyle(Color(nsColor: .selectedMenuItemTextColor)) : AnyShapeStyle(.secondary))
+        }
+      } else if let port = url?.port {
+        Text(verbatim: "No Metro on :\(port)")
+      } else {
+        Text("No bundle loaded")
+      }
+    }
+  }
+
   private var subtitle: String {
     var parts = [simulator.os]
     if store.snapshot.isAmbiguous(simulator) {
       parts.append(String(simulator.udid.prefix(4)))
     }
-    switch simulator.app {
-    case .notInstalled:
-      parts.append("App not installed")
-    case .installed(_, let running):
-      if let port = store.pendingPort(for: simulator) {
-        parts.append("Loading :\(port)…")
-      }
-      if !running {
-        parts.append("Not running")
-      }
+    if case .installed(_, running: false) = simulator.app {
+      parts.append("Not running")
     }
     return parts.joined(separator: " · ")
   }
 }
 
-/// A pop-up of the project's worktrees: those with a running Metro, then the rest, dimmed.
-/// Picking a Metro relaunches the app in the simulator, pointed at it.
-struct WorktreePicker: View {
+struct WorktreeRow: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
+  let worktree: Worktree
+  @State private var isHovered = false
 
   var body: some View {
-    let snapshot = store.snapshot
-    let current = snapshot.metro(for: simulator)
-    let idle = snapshot.worktrees.filter { snapshot.metro(for: $0) == nil }
-    let selection = Binding<Int?>(
-      get: { store.pendingPort(for: simulator) ?? current?.port },
-      set: { port in
-        guard let metro = snapshot.metros.first(where: { $0.port == port }), metro != current else { return }
-        Task { await store.point(simulator, at: metro) }
-      })
+    let metro = store.snapshot.metro(for: worktree)
+    let isCurrent = metro != nil && store.snapshot.metro(for: simulator) == metro
+    let isPending = metro != nil && store.pendingPort(for: simulator) == metro?.port
+    let isSelectable = metro != nil && !isCurrent
+    let isHighlighted = isSelectable && isHovered
+    let highlightedText = Color(nsColor: .selectedMenuItemTextColor)
 
-    Picker(selection: selection) {
-      if selection.wrappedValue == nil {
-        Text(verbatim: placeholder).tag(Int?.none)
-      }
-      ForEach(snapshot.metros) { metro in
-        Text(verbatim: "\(metro.worktree.name)  :\(metro.port)").tag(Int?.some(metro.port))
-      }
-      if !idle.isEmpty {
-        Section("No Metro running") {
-          // Negative tags never match a port, and the setter ignores them.
-          ForEach(Array(idle.enumerated()), id: \.element.id) { index, worktree in
-            Text(verbatim: worktree.name).tag(Int?.some(-1 - index)).selectionDisabled()
+    Button {
+      guard let metro, isSelectable else { return }
+      Task { await store.point(simulator, at: metro) }
+    } label: {
+      HStack {
+        Image(systemName: isCurrent ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(isHighlighted ? highlightedText : isCurrent ? Color.accentColor : .secondary)
+        HStack(alignment: .firstTextBaseline) {
+          Text(worktree.name).lineLimit(1).truncationMode(.middle)
+            .foregroundStyle(isHighlighted ? highlightedText : .primary)
+          Spacer()
+          if isPending {
+            ProgressView().controlSize(.small)
+          } else if let metro {
+            Text(verbatim: ":\(metro.port)").font(.callout).monospaced()
+              .foregroundStyle(isHighlighted ? highlightedText : .secondary)
           }
         }
+        // The line box centres cap height, which leaves lowercase branch names looking low.
+        .offset(y: -1)
       }
-    } label: {
-      EmptyView()
+      .padding(.horizontal, 7)
+      .padding(.vertical, 3)
+      .background(
+        RoundedRectangle(cornerRadius: 6)
+          .fill(isHighlighted ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
+      .contentShape(Rectangle())
     }
-    .labelsHidden()
-    .accessibilityIdentifier("\(simulator.udid)|worktree")
-  }
-
-  /// Shown while the simulator isn't on a running Metro.
-  private var placeholder: String {
-    guard case .installed(let url?, _) = simulator.app, let port = url.port else { return "Choose…" }
-    return "No Metro on :\(port)"
+    .buttonStyle(.plain)
+    // Let the highlight run out toward the window edge, as menu highlights do, while the text
+    // stays aligned with the simulator headers.
+    .padding(.horizontal, -7)
+    .onHover { isHovered = $0 }
+    // Only rows without a Metro are disabled; the current row stays at full strength.
+    .disabled(metro == nil)
+    .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    .opacity(metro == nil ? 0.4 : 1)
+    .help(worktree.path.path)
+    .accessibilityIdentifier("\(simulator.udid)|\(worktree.path.lastPathComponent)")
   }
 }
 
 /// Device Hub (Xcode 27+) selects a device in its main window for `devices://manage/select?id=<udid>`.
 /// The route comes from DeviceKit.framework's `DeviceManagementURLActionProvider`; Apple doesn't document it.
 /// `devices://device/open` opens a separate floating window per device instead.
-struct DeviceHubLink: View {
-  let simulator: Simulator
-  @State private var isHovered = false
-
-  var body: some View {
-    Button {
-      // macOS 14+ only lets an app hand focus to another app it explicitly yields to.
-      NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.dt.Devices")
-      let configuration = NSWorkspace.OpenConfiguration()
-      configuration.activates = true
-      NSWorkspace.shared.open(
-        URL(string: "devices://manage/select?id=\(simulator.udid)")!, configuration: configuration)
-    } label: {
-      Text(simulator.name).font(.headline).lineLimit(1)
-        .foregroundStyle(isHovered ? Color(nsColor: .selectedMenuItemTextColor) : .primary)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(
-          RoundedRectangle(cornerRadius: 6)
-            .fill(isHovered ? Color(nsColor: .selectedContentBackgroundColor) : .clear))
-        // Keep the text aligned with the rows; only the highlight extends past it, as on rows.
-        .padding(.horizontal, -7)
-        .padding(.vertical, -3)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .onHover { isHovered = $0 }
-    .help("Show in Device Hub")
-    .accessibilityIdentifier("\(simulator.udid)|devicehub")
-  }
+@MainActor
+func showInDeviceHub(_ simulator: Simulator) {
+  // macOS 14+ only lets an app hand focus to another app it explicitly yields to.
+  NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.dt.Devices")
+  let configuration = NSWorkspace.OpenConfiguration()
+  configuration.activates = true
+  NSWorkspace.shared.open(URL(string: "devices://manage/select?id=\(simulator.udid)")!, configuration: configuration)
 }
 
 struct SimulatorDetails: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
   /// Every title the buttons below can show, so they all reserve the same width.
-  private let buttonTitles = ["copy", "copied", "set", "done", FeedbackButton.failedTitle]
+  private let buttonTitles = ["show", "copy", "copied", "set", "done", FeedbackButton.failedTitle]
 
   var body: some View {
     let location = store.settings.location
     Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+      GridRow {
+        Text("Device Hub").foregroundStyle(.secondary)
+        Spacer()
+        FeedbackButton(title: "show", doneTitle: "show", widthOf: buttonTitles) {
+          showInDeviceHub(simulator)
+        }
+        .accessibilityIdentifier("\(simulator.udid)|devicehub")
+      }
       GridRow {
         Text("Screenshot").foregroundStyle(.secondary)
         Spacer()

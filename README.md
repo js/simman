@@ -15,7 +15,7 @@ For development, `make build` bundles a debug build into `build/debug/SimMan.app
 
 Choose the project folder in Settings, which opens on first launch and from the gear button in the menu. SimMan reads the app's bundle ID from `ios/` or `app.json`. The simulated location for the simulator details is set in the same window.
 
-For each booted simulator: the worktree and Metro port the dev build last loaded, then every worktree of the project. Worktrees with a running Metro can be clicked. Clicking one relaunches the app in that simulator, pointed at that Metro. Worktrees without a Metro are greyed out. Start Metro there yourself and the row lights up within two seconds.
+One row per booted simulator, with its OS and the worktree and Metro port the dev build last loaded. Click a row to expand it: worktrees with a running Metro are listed, and clicking one relaunches the app in that simulator, pointed at that Metro. Worktrees without a Metro sit behind a disclosure, greyed out. Start Metro in one and it moves up within two seconds. The expanded row also has Device Hub, screenshot, UUID and location actions.
 
 ## Limits
 

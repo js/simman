@@ -17,13 +17,17 @@ if CommandLine.arguments.contains("--dump") {
 } else if let flag = CommandLine.arguments.firstIndex(of: "--render") {
   let store = Store()
   await store.refresh()
-  let image = await MainActor.run {
-    let renderer = ImageRenderer(content: MenuContent().environment(store).background(.white))
-    renderer.scale = 2
-    return renderer.nsImage
+  // Drawn in an offscreen window rather than with ImageRenderer, which can't draw AppKit-backed views
+  // such as the ScrollView.
+  let png = await MainActor.run { () -> Data? in
+    let window = NSWindow(contentViewController: NSHostingController(rootView: MenuContent().environment(store)))
+    // Let SwiftUI settle the list's measured height.
+    RunLoop.main.run(until: .now + 0.5)
+    guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    return rep.representation(using: .png, properties: [:])
   }
-  guard let tiff = image?.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
-  else { fatalError("render failed") }
+  guard let png else { fatalError("render failed") }
   try png.write(to: URL(filePath: CommandLine.arguments[flag + 1]))
 } else {
   // Plain AppKit entry rather than a SwiftUI App: an App needs at least one scene, and SwiftUI opens
