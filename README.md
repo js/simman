@@ -1,6 +1,6 @@
 # SimMan
 
-SimMan is a macOS menu bar app for developers who run one Expo app from several git worktrees at once. It shows which worktree each booted iOS simulator loads its JavaScript from. One click points a simulator at another worktree.
+SimMan (Sim Manager) is a macOS menu bar app for developers who run one Expo app from several git worktrees at once. It shows which worktree each booted iOS simulator loads its JavaScript from. One click points a simulator at another worktree.
 
 <img src="screenshot.png" width="406" alt="The SimMan menu: one row per booted simulator, one expanded to list its worktrees with running Metro servers">
 
