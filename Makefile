@@ -3,15 +3,17 @@ INSTALL_DIR := /Applications
 # Only the copy needs root, and only when the user can't write to INSTALL_DIR.
 SUDO := $(shell test -w $(INSTALL_DIR) || echo sudo)
 
-.PHONY: build run dist install clean
+.PHONY: build run dist install release clean
 
 # Wraps the SwiftPM binary for configuration $(1) in an app bundle at build/$(1)/$(APP).
+# Setting VERSION, e.g. `make dist VERSION=1.2.0`, stamps it into the bundle's Info.plist.
 define bundle
 	swift build -c $(1)
 	rm -rf build/$(1)/$(APP)
 	mkdir -p build/$(1)/$(APP)/Contents/MacOS
 	cp "$$(swift build -c $(1) --show-bin-path)/SimMan" build/$(1)/$(APP)/Contents/MacOS/SimMan
 	cp Support/Info.plist build/$(1)/$(APP)/Contents/Info.plist
+	$(if $(VERSION),plutil -replace CFBundleShortVersionString -string $(VERSION) build/$(1)/$(APP)/Contents/Info.plist)
 	codesign --force --sign - build/$(1)/$(APP)
 endef
 
@@ -32,6 +34,10 @@ install: dist
 	$(SUDO) rm -rf $(INSTALL_DIR)/$(APP)
 	$(SUDO) cp -R build/release/$(APP) $(INSTALL_DIR)/
 	@echo "Installed $(INSTALL_DIR)/$(APP)"
+
+# Asks for a tag, then builds, zips and publishes a GitHub release. See scripts/release.sh.
+release:
+	scripts/release.sh
 
 clean:
 	rm -rf build .build

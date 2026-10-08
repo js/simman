@@ -19,6 +19,14 @@ With three Metro servers and four simulators, it is easy to lose track of which 
 
 ## Install
 
+Download `SimMan-<version>.zip` from the [latest release](https://github.com/js/simman/releases/latest), unzip it, and move `SimMan.app` to `/Applications`. Releases run on Apple silicon only. SimMan isn't notarized, so macOS blocks the first launch. To allow it, run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/SimMan.app
+```
+
+To build from source instead:
+
 ```sh
 git clone https://github.com/js/simman.git
 cd simman
@@ -64,3 +72,5 @@ To change the project or the location, click the gear button at the bottom of th
 ## Development
 
 `make build` builds a debug version into `build/debug/SimMan.app`. `make run` builds it, quits any running SimMan, and opens the new build.
+
+`make release` asks for a new tag and shows the previous one. It builds a release version, zips it, and has Claude Code write release notes from the commits since the previous tag. After you review or edit the notes, it pushes the tag and publishes a GitHub release with the zip attached. It needs the `gh` and `claude` command line tools.
