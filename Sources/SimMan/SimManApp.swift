@@ -80,24 +80,29 @@ struct MenuContent: View {
         Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
       }
       Divider()
-      HStack {
-        Text(verbatim: store.settings.project?.name ?? "No project").font(.caption).foregroundStyle(.secondary)
-        Button {
-          NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
-        } label: {
-          Image(systemName: "gearshape").font(.caption)
+      HStack(spacing: 6) {
+        Label {
+          Text(verbatim: store.settings.project?.name ?? "No project")
+        } icon: {
+          Image(systemName: "folder")
         }
-        .buttonStyle(SubtleButtonStyle())
-        .help("Settings")
-        .accessibilityIdentifier("settings")
+        .font(.caption)
+        .foregroundStyle(.secondary)
         if store.loadedAt != nil && store.isRefreshing && store.isStale {
           ProgressView().controlSize(.mini)
           Text("Refreshing…").font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Quit") { NSApplication.shared.terminate(nil) }
-          .buttonStyle(SubtleButtonStyle())
+        IconButton(systemImage: "gearshape") {
+          NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
+        }
+        .help("Settings")
+        .accessibilityIdentifier("settings")
+        IconButton(systemImage: "power") { NSApplication.shared.terminate(nil) }
+          .help("Quit SimMan")
       }
+      // The glyphs' hover circles reach past the text edge.
+      .padding(.trailing, -4)
     }
     .padding(12)
     .frame(width: 360)
@@ -378,68 +383,49 @@ func showInDeviceHub(_ simulator: Simulator) {
 struct SimulatorDetails: View {
   @Environment(Store.self) private var store
   let simulator: Simulator
-  /// Every title the buttons below can show, so they all reserve the same width.
-  private let buttonTitles = ["show", "copy", "copied", "set", "done", FeedbackButton.failedTitle]
 
   var body: some View {
     let location = store.settings.location
-    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
-      GridRow {
-        Text("Device Hub").foregroundStyle(.secondary)
-        Spacer()
-        FeedbackButton(title: "show", doneTitle: "show", widthOf: buttonTitles) {
-          showInDeviceHub(simulator)
-        }
-        .accessibilityIdentifier("\(simulator.udid)|devicehub")
+    HStack(spacing: 4) {
+      ActionTile(title: "Device Hub", doneTitle: "Opened", systemImage: "macwindow") {
+        showInDeviceHub(simulator)
       }
-      GridRow {
-        Text("Screenshot").foregroundStyle(.secondary)
-        Spacer()
-        FeedbackButton(title: "copy", doneTitle: "copied", widthOf: buttonTitles) {
-          let png = try await Discovery.screenshot(of: simulator)
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setData(png, forType: .png)
-        }
-        .accessibilityIdentifier("\(simulator.udid)|copy-screenshot")
+      .help("Show in Device Hub")
+      .accessibilityIdentifier("\(simulator.udid)|devicehub")
+      ActionTile(title: "Screenshot", doneTitle: "Copied", systemImage: "camera") {
+        let png = try await Discovery.screenshot(of: simulator)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(png, forType: .png)
       }
-      GridRow {
-        Text("UUID").foregroundStyle(.secondary)
-        Text(verbatim: simulator.udid)
-          .lineLimit(1).truncationMode(.middle)
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        FeedbackButton(title: "copy", doneTitle: "copied", widthOf: buttonTitles) {
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setString(simulator.udid, forType: .string)
-        }
-        .gridColumnAlignment(.trailing)
-        .accessibilityIdentifier("\(simulator.udid)|copy-uuid")
+      .help("Copy a screenshot")
+      .accessibilityIdentifier("\(simulator.udid)|copy-screenshot")
+      ActionTile(title: "UUID", doneTitle: "Copied", systemImage: "number") {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(simulator.udid, forType: .string)
       }
-      GridRow {
-        Text("Location").foregroundStyle(.secondary)
-        Text(verbatim: location.text)
-          .textSelection(.enabled)
-        FeedbackButton(title: "set", doneTitle: "done", widthOf: buttonTitles) {
-          try await Discovery.setLocation(of: simulator, to: location)
-        }
-        .accessibilityIdentifier("\(simulator.udid)|set-location")
+      .help("Copy \(simulator.udid)")
+      .accessibilityIdentifier("\(simulator.udid)|copy-uuid")
+      ActionTile(title: "Location", doneTitle: "Set", systemImage: "location") {
+        try await Discovery.setLocation(of: simulator, to: location)
       }
+      .help("Set location to \(location.text)")
+      .accessibilityIdentifier("\(simulator.udid)|set-location")
     }
-    .font(.caption)
+    // Run the tiles' hover fill out to the edges, as the rows above do.
+    .padding(.horizontal, -7)
   }
 }
 
-/// A small button that briefly swaps its title for `doneTitle`, or "failed", once its action finishes.
-/// Its label is as wide as the widest of `widthOf`, so swapping titles doesn't resize it.
-struct FeedbackButton: View {
-  static let failedTitle = "failed"
-
+/// A Control Center–style action: a glyph in a circle over a caption, the whole tile clickable.
+/// When the action finishes, the glyph and caption briefly show whether it worked.
+struct ActionTile: View {
   let title: String
   let doneTitle: String
-  let widthOf: [String]
+  let systemImage: String
   let action: () async throws -> Void
-  @State private var outcome: String?
+  @State private var succeeded: Bool?
   @State private var isRunning = false
+  @State private var isHovered = false
 
   var body: some View {
     Button {
@@ -447,44 +433,77 @@ struct FeedbackButton: View {
       Task {
         do {
           try await action()
-          outcome = doneTitle
+          succeeded = true
         } catch {
-          outcome = Self.failedTitle
+          succeeded = false
         }
         isRunning = false
         try? await Task.sleep(for: .seconds(1))
-        outcome = nil
+        succeeded = nil
       }
     } label: {
-      ZStack {
-        ForEach(widthOf, id: \.self) { Text($0).hidden() }
-        Text(outcome ?? title)
+      VStack(spacing: 5) {
+        ZStack {
+          Circle().fill(circleFill)
+          if isRunning {
+            ProgressView().controlSize(.small)
+          } else {
+            Image(systemName: glyph)
+              .font(.system(size: 13, weight: .medium))
+              .foregroundStyle(succeeded == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
+              .contentTransition(.symbolEffect(.replace))
+          }
+        }
+        .frame(width: 30, height: 30)
+        Text(succeeded == true ? doneTitle : succeeded == false ? "Failed" : title)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
       }
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 6)
+      .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(isHovered ? 0.07 : 0)))
+      .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
     .disabled(isRunning)
-    .buttonStyle(SubtleButtonStyle())
+    .onHover { isHovered = $0 }
+    .animation(.easeOut(duration: 0.15), value: succeeded)
+  }
+
+  private var glyph: String {
+    switch succeeded {
+    case true: "checkmark"
+    case false: "xmark"
+    case nil: systemImage
+    }
+  }
+
+  private var circleFill: Color {
+    switch succeeded {
+    case true: .green
+    case false: .red
+    case nil: .primary.opacity(isHovered ? 0.16 : 0.09)
+    }
   }
 }
 
-/// A faint rounded fill that strengthens on hover and press. Bordered AppKit buttons show no hover state.
-struct SubtleButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    HoverLabel(configuration: configuration)
-  }
+/// A borderless glyph that gains a round fill on hover, for the footer.
+struct IconButton: View {
+  let systemImage: String
+  let action: () -> Void
+  @State private var isHovered = false
 
-  private struct HoverLabel: View {
-    let configuration: Configuration
-    @State private var isHovered = false
-
-    var body: some View {
-      configuration.label
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(
-          RoundedRectangle(cornerRadius: 5)
-            .fill(Color.primary.opacity(configuration.isPressed ? 0.2 : isHovered ? 0.12 : 0.06)))
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(isHovered ? .primary : .secondary)
+        .frame(width: 26, height: 26)
+        .background(Circle().fill(Color.primary.opacity(isHovered ? 0.1 : 0)))
+        .contentShape(Circle())
     }
+    .buttonStyle(.plain)
+    .onHover { isHovered = $0 }
   }
 }
