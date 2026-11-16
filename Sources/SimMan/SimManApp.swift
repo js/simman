@@ -372,12 +372,15 @@ struct WorktreeRow: View {
 /// The route comes from DeviceKit.framework's `DeviceManagementURLActionProvider`; Apple doesn't document it.
 /// `devices://device/open` opens a separate floating window per device instead.
 @MainActor
-func showInDeviceHub(_ simulator: Simulator) {
+func showInDeviceHub(_ simulator: Simulator) async throws {
+  let url = URL(string: "devices://manage/select?id=\(simulator.udid)")!
+  // Without Device Hub, `open` returns without throwing, so check for a handler first.
+  guard NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { throw CocoaError(.fileNoSuchFile) }
   // macOS 14+ only lets an app hand focus to another app it explicitly yields to.
   NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.dt.Devices")
   let configuration = NSWorkspace.OpenConfiguration()
   configuration.activates = true
-  NSWorkspace.shared.open(URL(string: "devices://manage/select?id=\(simulator.udid)")!, configuration: configuration)
+  try await NSWorkspace.shared.open(url, configuration: configuration)
 }
 
 struct SimulatorDetails: View {
@@ -388,7 +391,7 @@ struct SimulatorDetails: View {
     let location = store.settings.location
     HStack(spacing: 4) {
       ActionTile(title: "Device Hub", doneTitle: "Opened", systemImage: "macwindow") {
-        showInDeviceHub(simulator)
+        try await showInDeviceHub(simulator)
       }
       .help("Show in Device Hub")
       .accessibilityIdentifier("\(simulator.udid)|devicehub")
